@@ -6,10 +6,11 @@ This repo uses Ollama to run open-source LLM model locally. Follow these steps t
 ### Download Ollama 
 Download Ollama from it's website: https://ollama.com/
 ### Check installation
-```ollama list``` This will list all the stored models on your pc
-### Pull an LLM locally
-``ollama pull dolphin-mistral`` will pull the model 'dolphin-mistral' on your pc which will be used in this code<br>
-Run ``ollama list`` to check if the model is stored.
+```ollama list``` This will list all the stored models on your pc, in cmd
+### Pull an LLM locally - in command line
+``ollama pull dolphin-mistral`` will pull the model 'dolphin-mistral' on your pc which will be used in this code<br><br>
+``ollama pull nomic-embed-text`` will pull the embedding model to be used. You can also use any other model.<br><br>
+Run ``ollama list`` to check if the models are stored.
 ### Run Ollama
 ``ollama serve`` will start the Ollama server on ``127.0.0.1:11434``
 
