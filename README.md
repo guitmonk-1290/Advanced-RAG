@@ -21,10 +21,9 @@ python -m venv .venv
 cd .venv/Scripts
 ./activate
 
-pip install llama-index
-pip install llama-index-embeddings-ollama
+pip install llama-index llama-index-llms-ollama llama-index-embeddings-ollama
 pip install langchain
-
+pip install mysql-connector-python
 pip install Flask
 ```
 
