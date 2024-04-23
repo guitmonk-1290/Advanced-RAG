@@ -31,7 +31,8 @@ pip install Flask
 ## Installation - with vLLM
 We can also use vLLM as our LLM which offers various features like pagedAttention.
 ### Install vLLM
-You can install vLLM with pip or build from source. Note that vLLM currently does not support Windows.
+You can install vLLM with pip or build from source.<br>
+<b>**Note that vLLM currently does not support Windows.</b>
 ```
 python -m venv .venv
 source .venv/bin/activate
