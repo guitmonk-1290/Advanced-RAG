@@ -26,6 +26,8 @@ pip install llama-index llama-index-llms-ollama llama-index-embeddings-ollama
 pip install langchain
 pip install mysql-connector-python
 pip install Flask
+pip install ray
+pip install "starlette==0.32.0"
 ```
 
 ## Installation - with vLLM
@@ -41,13 +43,22 @@ pip install vLLM
 pip install llama-index-llms-vllm
 ```
 
-### Run Flask server
+### Run Flask server - NOT FOR PRODUCTION
 Choose the LLM model to run by passing the ``--llm`` flag from the terminal.<br>
 ```
 python app.py --llm vllm
 python app.py --llm ollama
 ```
 Before running the script, make sure that ollama is running for embeddings and you have the models pulled.
+
+### Run the Ray server - FOR PRODUCTION INFERENCE API
+We will be using Ray serve to run an inference API ready for production.<br>
+To run the inference API server:<br><br>
+``serve run deploy_app:deployment``<br><br>
+The endpoint can then be accessed to make requests like this:<br><br>
+``curl http://localhost:8000/?query=How many total clients are there?``<br>
+
+<b>Note:</b> <i>This is a very basic inference API with dynamic batch requests. Feel free to contribute if you have a better solution.</i>
 
 ### Run the NodeJS server
 ``node index.js``
