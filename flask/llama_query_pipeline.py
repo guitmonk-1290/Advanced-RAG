@@ -1,4 +1,5 @@
 import datetime
+import argparse
 import os
 from pathlib import Path
 from typing import Dict
@@ -21,6 +22,7 @@ from llama_index.core.query_pipeline import (
 )
 from typing import List
 from llama_index.llms.ollama import Ollama
+from llama_index.llms.vllm import Vllm
 from llama_index.core.indices.struct_store.sql_query import (
     SQLTableRetrieverQueryEngine,
 )
@@ -60,8 +62,29 @@ class QueryExecutor:
         self.sql_database = SQLDatabase(self.engine)
         print("[INFO] ENGINE DIALECT: ", self.engine.dialect.name)
 
+        # Parse command-line arguments
+        parser = argparse.ArgumentParser(description="Query Executor")
+        parser.add_argument("--llm", type=str, default="vllm", choices=["vllm", "ollama"],
+                            help="Choose the LLM model (vllm or ollama)")
+        args = parser.parse_args()
+
+        if args.llm == "vllm":
+            self.llm = Vllm(
+                model="microsoft/Orca-2-7b",
+                dtype="float16",
+                tensor_parallel_size=1,
+                temperature=0,
+                max_new_tokens=100,
+                vllm_kwargs={
+                    "swap_space": 0,
+                    "gpu_memory_utilization": 0.5,
+                    "max_model_len": 4096,
+                },
+            )
+        else:
+            self.llm = Ollama(model="dolphin-mistral", request_timeout=500000)
+
         # Initialize LLM model settings
-        self.llm = Ollama(model="dolphin-mistral", request_timeout=500000)
         Settings.llm = self.llm
         Settings.embed_model = OllamaEmbedding(model_name="nomic-embed-text", embed_batch_size=500)
         
