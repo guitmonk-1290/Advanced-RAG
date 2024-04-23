@@ -22,8 +22,6 @@ class QADeployment:
     
     @serve.batch(max_batch_size=8, batch_wait_timeout_s=10)
     async def __call__(self, request: Request):
-        for item in request:
-            print(f"{item}\n")
         query = request.query_params["query"]
         return self.query(query)
     
