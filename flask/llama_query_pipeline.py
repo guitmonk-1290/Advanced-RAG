@@ -1,6 +1,8 @@
 import datetime
-import argparse
 import os
+import argparse
+os.environ["HF_HOME"] = "model/"
+
 from pathlib import Path
 from typing import Dict
 
@@ -51,7 +53,7 @@ from llama_index.core.objects import ObjectIndex
 from utils import connect_to_DB, execute_query
 
 class QueryExecutor:
-    def __init__(self, db_config):
+    def __init__(self, llm_type: str, db_config):
         # Callbacks support token-wise streaming
         self.callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
 
@@ -62,11 +64,16 @@ class QueryExecutor:
         self.sql_database = SQLDatabase(self.engine)
         print("[INFO] ENGINE DIALECT: ", self.engine.dialect.name)
 
-        # Parse command-line arguments
+        # # Parse command-line arguments
         parser = argparse.ArgumentParser(description="Query Executor")
-        parser.add_argument("--llm", type=str, default="vllm", choices=["vllm", "ollama"],
+        parser.add_argument("--llm", type=str, default="ollama", choices=["vllm", "ollama"],
                             help="Choose the LLM model (vllm or ollama)")
         args = parser.parse_args()
+
+        if args.llm is None:
+            args.llm = llm_type
+        
+        print(args.llm)
 
         if args.llm == "vllm":
             self.llm = Vllm(
@@ -83,10 +90,10 @@ class QueryExecutor:
             )
         else:
             self.llm = Ollama(model="dolphin-mistral", request_timeout=500000)
-
+        
         # Initialize LLM model settings
         Settings.llm = self.llm
-        Settings.embed_model = OllamaEmbedding(model_name="nomic-embed-text", embed_batch_size=500)
+        Settings.embed_model = OllamaEmbedding(base_url="http://127.0.0.1:11434", model_name="nomic-embed-text", embed_batch_size=500)
         
         self.table_node_mapping = SQLTableNodeMapping(self.sql_database)
 
