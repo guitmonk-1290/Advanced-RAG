@@ -29,6 +29,8 @@ cd .venv/Scripts
 pip install llama-index llama-index-llms-ollama llama-index-embeddings-ollama
 pip install langchain
 pip install mysql-connector-python
+pip install chromadb
+pip install llama-index-vector-stores-chroma
 pip install Flask
 pip install ray
 pip install "starlette==0.32.0"
