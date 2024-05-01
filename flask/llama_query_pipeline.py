@@ -6,6 +6,8 @@ os.environ["HF_HOME"] = "model/"
 from pathlib import Path
 from typing import Dict
 
+import ray
+import mysql.connector
 from langchain_community.llms import LlamaCpp, Ollama
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import (
@@ -33,7 +35,8 @@ from llama_index.core.objects import (
     ObjectIndex,
     SQLTableSchema
 )
-from llama_index.core import VectorStoreIndex, load_index_from_storage
+from llama_index.core import VectorStoreIndex, load_index_from_storage, SimpleDirectoryReader
+from llama_index.core.schema import BaseNode
 from llama_index.core import SQLDatabase
 from llama_index.core import Settings
 from llama_index.core.service_context import ServiceContext
@@ -42,11 +45,15 @@ from llama_index.core.query_pipeline import FnComponent
 from llama_index.core.retrievers import SQLRetriever
 from llama_index.core.llms import ChatResponse
 from llama_index.embeddings.ollama import OllamaEmbedding
+from llama_index.vector_stores.chroma import ChromaVectorStore
+
+import chromadb
 from sqlalchemy import (
     create_engine,
     MetaData,
     text
 )
+
 from llama_index.core.schema import TextNode
 from llama_index.core.storage import StorageContext
 from llama_index.core.objects import ObjectIndex
@@ -93,7 +100,7 @@ class QueryExecutor:
         
         # Initialize LLM model settings
         Settings.llm = self.llm
-        Settings.embed_model = OllamaEmbedding(base_url="http://127.0.0.1:11434", model_name="nomic-embed-text", embed_batch_size=500)
+        Settings.embed_model = OllamaEmbedding(base_url="http://127.0.0.1:11434", model_name="nomic-embed-text", embed_batch_size=512)
         
         self.table_node_mapping = SQLTableNodeMapping(self.sql_database)
 
@@ -112,10 +119,23 @@ class QueryExecutor:
             # load index
             self.obj_index = ObjectIndex.from_persist_dir("indexes", self.table_node_mapping)
 
-        self.obj_retriever = self.obj_index.as_retriever(similarity_top_k=3)
+        self.obj_retriever = self.obj_index.as_retriever(similarity_top_k=2)
         self.sql_retriever = SQLRetriever(self.sql_database)
 
         self.SQLQuery = ""
+
+    def remove_collections(self, chroma_client):
+        """
+        Remove all the collections present in ChromaDB
+
+        Arguments:
+            chroma_client -> The chromaDB client
+        """
+        collections = chroma_client.list_collections()
+        collection_names = [collection.name for collection in collections]
+        for collection_name in collection_names:
+            chroma_client.delete_collection(collection_name)
+
 
     def index_all_tables(self, table_index_dir: str = "table_index_dir") -> Dict[str, VectorStoreIndex]:
         """Index all tables."""
@@ -124,12 +144,22 @@ class QueryExecutor:
 
         vector_index_dict = {}
         engine = self.sql_database.engine
+        print(f"[LOG] Started indexing at {datetime.datetime.now()}")
+
+        chroma_client = chromadb.PersistentClient()
+
         for table_name in self.sql_database.get_usable_table_names():
-            print(f"Indexing rows in table: {table_name}")
-            if not os.path.exists(f"{table_index_dir}/{table_name}"):
+            print(f"[LOG] Indexing rows in table: {table_name}")
+
+            # if not os.path.exists(f"{table_index_dir}/{table_name}"):
+            if f"{table_name}" not in [c.name for c in chroma_client.list_collections()]:
+                chroma_collection = chroma_client.create_collection(name=f"{table_name}")
+                vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+
                 # get all rows from table
+                print(f"[INFO] Cannot find index directory for table [{table_name}]")
                 with engine.connect() as conn:
-                    cursor = conn.execute(text(f'SELECT * FROM {table_name};'))
+                    cursor = conn.execute(text(f'SELECT * FROM {table_name} LIMIT 3;'))
                     result = cursor.fetchall()
                     row_tups = []
                     for row in result:
@@ -138,21 +168,21 @@ class QueryExecutor:
                 # index each row, put into vector store index
                 nodes = [TextNode(text=str(t)) for t in row_tups]
 
-                # put into vector store index (use OpenAIEmbeddings by default)
-                index = VectorStoreIndex(nodes, service_context=self.service_context)
+                self.storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
-                # save index
-                index.set_index_id("vector_index")
-                index.storage_context.persist(f"{table_index_dir}/{table_name}")
+                # put into vector store index (use OpenAIEmbeddings by default)
+                print(f"[INFO] Writing indexes to chromaDB for {table_name}")
+                index = VectorStoreIndex(nodes, service_context=self.service_context, storage_context=self.storage_context)
             else:
-                # rebuild storage context
-                storage_context = StorageContext.from_defaults(
-                    persist_dir=f"{table_index_dir}/{table_name}"
+                print(f"[INFO] Found existing indexes in chromaDB..")
+
+                chroma_collection = chroma_client.get_collection(name=f"{table_name}")
+                vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
+ 
+                index = VectorStoreIndex.from_vector_store(
+                    vector_store=vector_store
                 )
-                # load index
-                index = load_index_from_storage(
-                    storage_context, index_id="vector_index", service_context=self.service_context
-                )
+
             vector_index_dict[table_name] = index
 
         return vector_index_dict
@@ -220,6 +250,7 @@ class QueryExecutor:
 
     def run_query(self, query: str):
         """Run Queries"""
+        print(f"[LOG] Started processing at {datetime.datetime.now()}")
         response = self.qp.run(query=query)
         db_config = self.db_config
         query = self.SQLQuery
