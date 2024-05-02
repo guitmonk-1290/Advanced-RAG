@@ -245,7 +245,9 @@ class QueryExecutor:
         if sql_result_start != -1:
             response = response[:sql_result_start]
         # Modified --> introduced SQLQuery variable
-        self.SQLQuery = response.strip().strip("```").strip()
+        self.SQLQuery = response.strip("\n\t ").replace("\n", " ").strip("```").strip()
+        if self.SQLQuery.startswith("sql "):
+            self.SQLQuery = self.SQLQuery[4:]
         return self.SQLQuery
 
     def run_query(self, query: str):
