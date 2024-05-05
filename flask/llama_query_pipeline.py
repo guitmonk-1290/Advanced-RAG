@@ -139,7 +139,12 @@ class QueryExecutor:
 
 
     def index_all_tables(self, table_index_dir: str = "table_index_dir") -> Dict[str, VectorStoreIndex]:
-        """Index all tables."""
+        """
+        Index all the tables in the database
+
+        Arguments:
+            table_index_dir -> Directory name for storing table indexes locally
+        """
         if not Path(table_index_dir).exists():
             os.makedirs(table_index_dir)
 
@@ -191,7 +196,13 @@ class QueryExecutor:
     def get_table_context_and_rows_str(
         self, query_str: str, table_schema_objs: List[SQLTableSchema]
     ):
-        """Get table context string."""
+        """
+        Get table context string with 'k' rows. The 'k' variable can be set using 'similarity_top_k' argument
+
+        Arguments:
+            query_str -> User query
+            table_schema_objs -> A list containing the table_name and context_str for each table in the database
+        """
         print(f"\n<-------------[MATCHED_TABLES]-------------->")
         for table_schema_obj in table_schema_objs:
             print(f"[INFO] {table_schema_obj.table_name}")
@@ -239,7 +250,12 @@ class QueryExecutor:
         return "\n\n".join(context_strs)
 
     def get_table_context_str(self, table_schema_objs: List[SQLTableSchema]):
-        """Get table context string"""
+        """
+        Get table context string without any rows
+
+        Arguments:
+            table_schema_objs -> A list containing the table_name and context_str for each table in the database
+        """
         context_strs = []
         for table_schema_obj in table_schema_objs:
             table_info = self.sql_database.get_single_table_info(
@@ -254,7 +270,12 @@ class QueryExecutor:
         return "\n\n".join(context_strs)
 
     def parse_response_to_sql(self, response: ChatResponse) -> str:
-        """Parse response to SQL."""
+        """
+        Parse the response from the LLM to get the SQL query
+
+        Arguments:
+            response -> an Object of type 'ChatResponse' containing the response from the LLM
+        """
         response = response.message.content
         sql_query_start = response.find("SQLQuery:")
         if sql_query_start != -1:
@@ -273,7 +294,12 @@ class QueryExecutor:
         self.SQLQuery = re.sub(pattern, ';', self.SQLQuery)
 
     def run_query(self, query: str):
-        """Run Queries"""
+        """
+        Run the user query against the Query Pipeline.
+
+        Arguments:
+            query -> user query
+        """
         print(f"[LOG] Started processing at {datetime.datetime.now()}")
         response = self.qp.run(query=query)
         db_config = self.db_config
@@ -283,6 +309,9 @@ class QueryExecutor:
         return self.SQLQuery, response, data
 
     def setup_query_pipeline(self):
+        """
+        Setup the Query Pipeline
+        """
         # Define functional components
         table_parser_component = FnComponent(fn=self.get_table_context_and_rows_str)
         sql_parser_component = FnComponent(fn=self.parse_response_to_sql)
