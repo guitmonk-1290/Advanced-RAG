@@ -1,6 +1,7 @@
 import datetime
 import os
 import argparse
+import re
 os.environ["HF_HOME"] = "model/"
 
 from pathlib import Path
@@ -119,7 +120,7 @@ class QueryExecutor:
             # load index
             self.obj_index = ObjectIndex.from_persist_dir("indexes", self.table_node_mapping)
 
-        self.obj_retriever = self.obj_index.as_retriever(similarity_top_k=2)
+        self.obj_retriever = self.obj_index.as_retriever(similarity_top_k=5)
         self.sql_retriever = SQLRetriever(self.sql_database)
 
         self.SQLQuery = ""
@@ -191,13 +192,33 @@ class QueryExecutor:
         self, query_str: str, table_schema_objs: List[SQLTableSchema]
     ):
         """Get table context string."""
-        print("[LOG] table_schema_objects: ", table_schema_objs[0])
-        context_strs = []
+        print(f"\n<-------------[MATCHED_TABLES]-------------->")
         for table_schema_obj in table_schema_objs:
-            # first append table info + additional context
-            table_info = self.sql_database.get_single_table_info(
-                table_schema_obj.table_name
-            )
+            print(f"[INFO] {table_schema_obj.table_name}")
+        print("\n\n")
+        context_strs = []
+        metadata = MetaData()
+        metadata.reflect(bind=self.engine)
+        
+        for table_schema_obj in table_schema_objs:
+            table = metadata.tables[table_schema_obj.table_name]
+            columns = table.columns
+
+            table_info = ""
+            table_info += f"CREATE TABLE `{table_schema_obj.table_name}` ("
+            for column in columns:
+                # Format column information
+                column_info = f"`{column.name}` {column.type}"
+                # Add information about constraints (e.g., primary key, not null)
+                if column.primary_key:
+                    column_info += " PRIMARY KEY"
+                if not column.nullable:
+                    column_info += " NOT NULL"
+                table_info += f"{column_info}, "
+            table_info += ")\n"
+
+            print(f"[SCHEMA_INFO] {table_schema_obj.table_name}: {table_info}")
+
             if table_schema_obj.context_str:
                 table_opt_context = " The table description is: "
                 table_opt_context += table_schema_obj.context_str
@@ -206,7 +227,7 @@ class QueryExecutor:
             # also lookup vector index to return relevant table rows
             relevant_nodes = self.vector_index_dict[
                 table_schema_obj.table_name
-            ].as_retriever(similarity_top_k=2).retrieve(query_str)
+            ].as_retriever(similarity_top_k=5).retrieve(query_str)
             if len(relevant_nodes) > 0:
                 print(f"[LOG] relevant_nodes: {relevant_nodes[0]}")
                 table_row_context = "\nHere are some relevant example rows (values in the same order as columns above)\n"
@@ -248,7 +269,8 @@ class QueryExecutor:
         self.SQLQuery = response.strip("\n\t ").replace("\n", " ").strip("```").strip()
         if self.SQLQuery.startswith("sql "):
             self.SQLQuery = self.SQLQuery[4:]
-        return self.SQLQuery
+        pattern = r';.*'
+        self.SQLQuery = re.sub(pattern, ';', self.SQLQuery)
 
     def run_query(self, query: str):
         """Run Queries"""
