@@ -1,28 +1,32 @@
-from flask import Flask, request, jsonify
+from fastapi import FastAPI, Body
+from pydantic import BaseModel
+from typing import Optional
 from llama_query_pipeline import QueryExecutor
 
-app = Flask(__name__)
+app = FastAPI()
 
-@app.route('/')
-def base():
-    return jsonify({"status": 200})
+class InputText(BaseModel):
+  inputText: str
 
-@app.route('/process-text', methods=['POST'])
-def process_text():
-    query = request.json.get('inputText')
-    
-    try:
-        query_executor = QueryExecutor(llm_type="ollama", db_config={
-            "host": "127.0.0.1",
-            "user": "root",
-            "password": "root",
-            "database": "spectra"
-        })
-        query_executor.setup_query_pipeline()
-        sql_query, response, data = query_executor.run_query(query)
-        return jsonify({ "SQLQuery": sql_query, "response": str(response.message), "data": data })
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+@app.get("/")
+async def base():
+  return {"status": 200}
 
-if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+@app.post("/process-text", response_model=dict, status_code=200)
+async def process_text(text: InputText = Body(...)):
+  try:
+    query_executor = QueryExecutor(llm_type="ollama", db_config={
+        "host": "127.0.0.1",
+        "user": "arinxd",
+        "password": "eatdatass",
+        "database": "spectra"
+    })
+    query_executor.setup_query_pipeline()
+    sql_query, response, data = query_executor.run_query(text.inputText)
+    return {"SQLQuery": sql_query, "response" : response, "data" : data}
+  except Exception as e:
+    return {"error": str(e)}, 500
+
+if __name__ == "__main__":
+  import uvicorn
+  uvicorn.run(app, host="0.0.0.0", port=5000)
