@@ -10,8 +10,8 @@ Download Ollama from it's website: https://ollama.com/
 ### Pull an LLM locally
 Run these commands to pull the appropriate models for creating embeddings and generating response
 ```
-ollama pull dolphin-mistral
-ollama pull nomic-embed-text
+ollama pull phi3
+ollama pull mxbai-embed-large
 
 ollama list
 ```
