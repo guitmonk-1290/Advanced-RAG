@@ -31,7 +31,7 @@ pip install langchain
 pip install mysql-connector-python
 pip install chromadb
 pip install llama-index-vector-stores-chroma
-pip install Flask
+pip install fastapi
 pip install ray
 pip install "starlette==0.32.0"
 ```
@@ -49,7 +49,7 @@ pip install vllm
 pip install llama-index-llms-vllm
 ```
 
-## Run Flask server 
+## Run FastAPI server 
 Choose the LLM model to run by passing the ``--llm`` flag from the terminal.<br>
 ```
 python app.py --llm vllm
