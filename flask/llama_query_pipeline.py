@@ -97,11 +97,11 @@ class QueryExecutor:
                 },
             )
         else:
-            self.llm = Ollama(model="dolphin-mistral", request_timeout=500000)
+            self.llm = Ollama(model="phi3", request_timeout=500000)
         
         # Initialize LLM model settings
         Settings.llm = self.llm
-        Settings.embed_model = OllamaEmbedding(base_url="http://127.0.0.1:11434", model_name="nomic-embed-text", embed_batch_size=512)
+        Settings.embed_model = OllamaEmbedding(base_url="http://127.0.0.1:11434", model_name="mxbai-embed-large", embed_batch_size=512)
         
         self.table_node_mapping = SQLTableNodeMapping(self.sql_database)
 
@@ -231,8 +231,8 @@ class QueryExecutor:
             print(f"[SCHEMA_INFO] {table_schema_obj.table_name}: {table_info}")
 
             if table_schema_obj.context_str:
-                table_opt_context = " The table description is: "
-                table_opt_context += table_schema_obj.context_str
+                # table_opt_context = " The table description is: "
+                table_opt_context = table_schema_obj.context_str
                 table_info += table_opt_context
 
             # also lookup vector index to return relevant table rows
