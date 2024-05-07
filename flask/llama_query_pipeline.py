@@ -120,6 +120,8 @@ class QueryExecutor:
             # load index
             self.obj_index = ObjectIndex.from_persist_dir("indexes", self.table_node_mapping)
 
+        # 'similarity_top_k' sets the closest number of tables to the user query.
+        # Reducing this would increase accuracy given that the CORRECT related tables are being retrieved!
         self.obj_retriever = self.obj_index.as_retriever(similarity_top_k=5)
         self.sql_retriever = SQLRetriever(self.sql_database)
 
