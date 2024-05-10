@@ -1,13 +1,11 @@
 import datetime
 import os
 import re
-import argparse
 os.environ["HF_HOME"] = "model/"
 
 from pathlib import Path
 from typing import Dict
 
-import mysql.connector
 from langchain_community.llms import LlamaCpp
 from langchain.callbacks.manager import CallbackManager
 from langchain.callbacks.streaming_stdout import (
@@ -15,34 +13,17 @@ from langchain.callbacks.streaming_stdout import (
 )  # for streaming resposne
 
 from schema_objects import table_schema_objs
-from llama_index.core.query_pipeline import FnComponent
-from llama_index.core.prompts import PromptTemplate
-from llama_index.core.prompts.default_prompts import DEFAULT_TEXT_TO_SQL_PROMPT
-from llama_index.core.query_pipeline import (
-    QueryPipeline as QP,
-    Link,
-    InputComponent,
-    CustomQueryComponent
-)
 from typing import List
 from llama_index.llms.ollama import Ollama
-from llama_index.core.indices.struct_store.sql_query import (
-    SQLTableRetrieverQueryEngine,
-)
 from llama_index.core.objects import (
     SQLTableNodeMapping,
     ObjectIndex,
     SQLTableSchema
 )
 from llama_index.core import VectorStoreIndex, load_index_from_storage, SimpleDirectoryReader
-from llama_index.core.schema import BaseNode
 from llama_index.core import SQLDatabase
 from llama_index.core import Settings
 from llama_index.core.service_context import ServiceContext
-from llama_index.core.prompts import PromptTemplate
-from llama_index.core.query_pipeline import FnComponent
-from llama_index.core.retrievers import SQLRetriever
-from llama_index.core.llms import ChatResponse
 from llama_index.embeddings.ollama import OllamaEmbedding
 from llama_index.vector_stores.chroma import ChromaVectorStore
 
@@ -57,9 +38,10 @@ from llama_index.core.schema import TextNode
 from llama_index.core.storage import StorageContext
 from llama_index.core.objects import ObjectIndex
 from utils import connect_to_DB, execute_query
+import ollama
 
 class QueryExecutor:
-    def __init__(self, llm_type: str, db_config):
+    def __init__(self, db_config):
         # Callbacks support token-wise streaming
         self.callback_manager = CallbackManager([StreamingStdOutCallbackHandler()])
 
@@ -78,29 +60,25 @@ class QueryExecutor:
         
         self.table_node_mapping = SQLTableNodeMapping(self.sql_database)
 
-        self.obj_index = ObjectIndex.from_objects(
-            table_schema_objs,
-            self.table_node_mapping,
-            VectorStoreIndex,
-        )
+        if not Path("indexes").exists():
+            # Get table node mappings
+
+            self.obj_index = ObjectIndex.from_objects(
+                table_schema_objs,
+                self.table_node_mapping,
+                VectorStoreIndex,
+            )
+            self.obj_index.persist(persist_dir="indexes")
+        else:
+            print("[INFO] Found existing indexes. Loading from disk...\nNote: Delete the indexes directory to create new indexes\n")
+            storage_context = StorageContext.from_defaults(persist_dir="indexes")
+            # load index
+            self.obj_index = ObjectIndex.from_persist_dir("indexes", self.table_node_mapping)
 
         self.obj_retriever = self.obj_index.as_retriever(similarity_top_k=1)
-        self.sql_retriever = SQLRetriever(self.sql_database)
+        self.sql_connection = connect_to_DB(db_config)
 
         self.SQLQuery = ""
-
-    def remove_collections(self, chroma_client):
-        """
-        Remove all the collections present in ChromaDB
-
-        Arguments:
-            chroma_client -> The chromaDB client
-        """
-        collections = chroma_client.list_collections()
-        collection_names = [collection.name for collection in collections]
-        for collection_name in collection_names:
-            chroma_client.delete_collection(collection_name)
-
 
     def index_all_tables(self, table_index_dir: str = "table_index_dir") -> Dict[str, VectorStoreIndex]:
         """Index all tables."""
@@ -156,26 +134,15 @@ class QueryExecutor:
         self, query_str: str, table_schema_objs: List[SQLTableSchema]
     ):
         """Get table context string."""
-        print(f"-------------[TABLE_SCHEMA_OBJS]--------------")
-        for table_schema_obj in table_schema_objs:
-            print(f"[INFO] {table_schema_obj.table_name}")
-        print("\n\n")
-        # context_strs = []
         context_strs = ""
         metadata = MetaData()
         metadata.reflect(bind=self.engine)
 
         for table_schema_obj in table_schema_objs:
-            # first append table info + additional context
-            
-            # table_info = self.sql_database.get_single_table_info(
-            #     table_schema_obj.table_name
-            # )
-
             table = metadata.tables[table_schema_obj.table_name]
             columns = table.columns
 
-            table_info = ""
+            table_info = "I have this SQL table schema: "
             table_info += f"CREATE TABLE `{table_schema_obj.table_name}` ("
             for column in columns:
                 # Format column information
@@ -190,7 +157,6 @@ class QueryExecutor:
                 table_info += f"{column_info}, "
             table_info += ")\n"
 
-            print(f"[INFO] {table_schema_obj.table_name}: {table_info}")
 
             if table_schema_obj.context_str:
                 # table_opt_context = " The table description is: "
@@ -210,7 +176,6 @@ class QueryExecutor:
 
             # context_strs.append(table_info)
             context_strs += f"{table_info}\n"
-            print(f"\n\n[INFO] Context Strings: {context_strs}\n\n")
         # return "\n\n".join(context_strs)
         return context_strs
 
@@ -229,9 +194,8 @@ class QueryExecutor:
             context_strs.append(table_info)
         return "\n\n".join(context_strs)
 
-    def parse_response_to_sql(self, response: ChatResponse) -> str:
+    def parse_response_to_sql(self, response: str) -> str:
         """Parse response to SQL."""
-        response = response.message.content
         sql_query_start = response.find("SQLQuery:")
         if sql_query_start != -1:
             response = response[sql_query_start:]
@@ -249,78 +213,41 @@ class QueryExecutor:
         self.SQLQuery = re.sub(pattern, ';', self.SQLQuery)
 
         return self.SQLQuery
-
-    # def parse_response_to_sql(self, response: ChatResponse) -> str:
-    #     """Parse response to SQL."""
-    #     response = response.message.content
-    #     self.SQLQuery = response.strip("\n\t ").replace("\n", " ")
-    #     return self.SQLQuery
-
-    def run_query(self, query: str):
-        """Run Queries"""
-        print(f"[LOG] Started processing at {datetime.datetime.now()}")
-        response = self.qp.run(query=query)
-        # db_config = self.db_config
-        query = self.SQLQuery
-        connector = connect_to_DB(self.db_config)
-        data = execute_query(connection=connector, query=query)
-        return self.SQLQuery, response, data
-
-    def setup_query_pipeline(self):
-        # Define functional components
-        table_parser_component = FnComponent(fn=self.get_table_context_and_rows_str)
-        sql_parser_component = FnComponent(fn=self.parse_response_to_sql)
-
-        text2sql_prompt = DEFAULT_TEXT_TO_SQL_PROMPT.partial_format(
-            dialect=self.engine.dialect.name
-        )
-
-        response_synthesis_prompt_str = (
-            "Given an input question, synthesize a response from the query results. Only create a response from the SQL response itself and do not make up any information.\n"
-            "Query: {query_str}\n"
-            "SQL: {sql_query}\n"
-            "SQL Response: {context_str}\n"
-            "Response: "
-        )
-        response_synthesis_prompt = PromptTemplate(
-            response_synthesis_prompt_str,
-        )
-
-        # Define Query Pipeline
-        self.qp = QP(
-            modules={
-                "input": InputComponent(),
-                "table_retriever": self.obj_retriever,
-                "table_output_parser": table_parser_component,
-                "text2sql_prompt": text2sql_prompt,
-                "text2sql_llm": self.llm,
-                "sql_output_parser": sql_parser_component,
-                "sql_retriever": self.sql_retriever,
-                "response_synthesis_prompt": response_synthesis_prompt,
-                "response_synthesis_llm": self.llm
-            },
-            verbose=True
-        )
-
-        self.service_context = ServiceContext.from_defaults(llm=self.llm, embed_model=Settings.embed_model, callback_manager=self.qp.callback_manager)
+    
+    def run(self, query: str):
+        print(f"EXECUTION STARTED AT {datetime.datetime.now()}")
+        self.service_context = ServiceContext.from_defaults(llm=self.llm, embed_model=Settings.embed_model)
         self.vector_index_dict = self.index_all_tables()
 
-        # Add Chains and Links between modules
-        self.qp.add_link("input", "table_retriever")
-        self.qp.add_link("input", "table_output_parser", dest_key="query_str")
-        self.qp.add_link(
-            "table_retriever", "table_output_parser", dest_key="table_schema_objs"
+        table_schema_objs = self.obj_retriever.retrieve(query)
+        print(f"[TABLE_SCHEMA_OBJ]: {table_schema_objs}")
+        context_str = self.get_table_context_and_rows_str(query_str=query, table_schema_objs=table_schema_objs)
+        context_str += f"Write a SQL query for this user query: '{query}'"
+        # print(f"[CONTEXT_STR]: {context_str}")
+
+
+        response = ollama.chat(
+            model='phi3',
+            messages=[{'role': 'user', 'content': context_str}],
+            stream=False,
         )
-        self.qp.add_link("input", "text2sql_prompt", dest_key="query_str")
-        self.qp.add_link("table_output_parser", "text2sql_prompt", dest_key="schema")
-        self.qp.add_chain(
-            ["text2sql_prompt", "text2sql_llm", "sql_output_parser", "sql_retriever"]
+
+        sql_parsed = self.parse_response_to_sql(response['message']['content'])
+        # print(f"[PARSED_SQL]: {sql_parsed}")
+
+        sql_res = execute_query(self.sql_connection, sql_parsed)
+        # print(f"[SQL_RES]: {sql_res}")
+
+        response_synthesis_prompt_str = f"Given an input question, a SQL query and the SQL response from that query, write a short one-line natural language description of the SQL response and do not make up any information. user query: {query}, sql query: {sql_parsed}, sql response: {sql_res}"
+
+        # print(f"[NL_RESPONSE_PROMPT]: {response_synthesis_prompt_str}")
+
+        response = ollama.chat(
+            model='phi3',
+            messages=[{'role': 'user', 'content': response_synthesis_prompt_str}],
+            stream=False,
         )
-        self.qp.add_link(
-            "sql_output_parser", "response_synthesis_prompt", dest_key="sql_query"
-        )
-        self.qp.add_link(
-            "sql_retriever", "response_synthesis_prompt", dest_key="context_str"
-        )
-        self.qp.add_link("input", "response_synthesis_prompt", dest_key="query_str")
-        self.qp.add_link("response_synthesis_prompt", "response_synthesis_llm")
+        # print(f"[NL_RESPONSE]: {response['message']['content']}")
+
+        print(f"EXECUTION FINISHED AT {datetime.datetime.now()}")
+        return sql_parsed, response['message']['content']
