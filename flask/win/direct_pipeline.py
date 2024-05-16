@@ -50,13 +50,13 @@ class QueryExecutor:
         # Connect to database
         self.engine = create_engine(f"mysql://{db_config['user']}:{db_config['password']}@localhost:3306/{db_config['database']}")
         self.sql_database = SQLDatabase(self.engine, view_support=True)
-        print("[INFO] ENGINE DIALECT: ", self.engine.dialect.name)
+        # print("[INFO] ENGINE DIALECT: ", self.engine.dialect.name)
 
         self.llm = Ollama(model="phi3", request_timeout=500000)
         
         # Initialize LLM model settings
         Settings.llm = self.llm
-        Settings.embed_model = OllamaEmbedding(base_url="http://127.0.0.1:11434", model_name="mxbai-embed-large", embed_batch_size=512)
+        Settings.embed_model = OllamaEmbedding(base_url="http://127.0.0.1:11434", model_name="nomic-embed-text", embed_batch_size=512)
         
         self.table_node_mapping = SQLTableNodeMapping(self.sql_database)
 
@@ -92,7 +92,7 @@ class QueryExecutor:
         chroma_client = chromadb.PersistentClient()
 
         for table_name in self.sql_database.get_usable_table_names():
-            print(f"[LOG] Indexing rows in table: {table_name}")
+            # print(f"[LOG] Indexing rows in table: {table_name}")
 
             # if not os.path.exists(f"{table_index_dir}/{table_name}"):
             if f"{table_name}" not in [c.name for c in chroma_client.list_collections()]:
@@ -100,7 +100,7 @@ class QueryExecutor:
                 vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
 
                 # get all rows from table
-                print(f"[INFO] Cannot find index directory for table [{table_name}]")
+                # print(f"[INFO] Cannot find index directory for table [{table_name}]")
                 with engine.connect() as conn:
                     cursor = conn.execute(text(f'SELECT * FROM {table_name} LIMIT 3;'))
                     result = cursor.fetchall()
@@ -114,10 +114,10 @@ class QueryExecutor:
                 self.storage_context = StorageContext.from_defaults(vector_store=vector_store)
 
                 # put into vector store index (use OpenAIEmbeddings by default)
-                print(f"[INFO] Writing indexes to chromaDB for {table_name}")
+                # print(f"[INFO] Writing indexes to chromaDB for {table_name}")
                 index = VectorStoreIndex(nodes, service_context=self.service_context, storage_context=self.storage_context)
             else:
-                print(f"[INFO] Found existing indexes in chromaDB..")
+                # print(f"[INFO] Found existing indexes in chromaDB..")
 
                 chroma_collection = chroma_client.get_collection(name=f"{table_name}")
                 vector_store = ChromaVectorStore(chroma_collection=chroma_collection)
@@ -138,11 +138,12 @@ class QueryExecutor:
         metadata = MetaData()
         metadata.reflect(bind=self.engine)
 
+        # table_info = f"These are the table schemas for 2 tables named {table_schema_objs[0].table_name} and {table_schema_objs[1].table_name}\n"
         for table_schema_obj in table_schema_objs:
             table = metadata.tables[table_schema_obj.table_name]
             columns = table.columns
 
-            table_info = "I have this SQL table schema: "
+            table_info = ""
             table_info += f"CREATE TABLE `{table_schema_obj.table_name}` ("
             for column in columns:
                 # Format column information
@@ -154,7 +155,7 @@ class QueryExecutor:
                     column_info += " NOT NULL"
                 if column.comment:
                     column_info += f" '{column.comment}'"
-                table_info += f"{column_info}, "
+                table_info += f"{column_info}, \n"
             table_info += ")\n"
 
 
@@ -190,29 +191,31 @@ class QueryExecutor:
                 table_opt_context = " The table description is: "
                 table_opt_context += table_schema_obj.context_str
                 table_info += table_opt_context
+            
+            print(f"[TABLE_INFO] {table_info}")
 
             context_strs.append(table_info)
+        
+        print(f"[CONTEXT]: {context_strs}")
         return "\n\n".join(context_strs)
 
     def parse_response_to_sql(self, response: str) -> str:
         """Parse response to SQL."""
-        sql_query_start = response.find("SQLQuery:")
-        if sql_query_start != -1:
-            response = response[sql_query_start:]
-            # TODO: move to removeprefix after Python 3.9+
-            if response.startswith("SQLQuery:"):
-                response = response[len("SQLQuery:") :]
-        sql_result_start = response.find("SQLResult:")
-        if sql_result_start != -1:
-            response = response[:sql_result_start]
-        # Modified --> introduced SQLQuery variable
-        self.SQLQuery = response.strip("\n\t ").replace("\n", " ").strip("```").strip()
-        if self.SQLQuery.startswith("sql "):
-            self.SQLQuery = self.SQLQuery[4:]
-        pattern = r';.*'
-        self.SQLQuery = re.sub(pattern, ';', self.SQLQuery)
+        pattern = r'```sql\n+(.*?)\n+```'
+        match = re.search(pattern, response, re.DOTALL)
+        if match:
+            response = match.group(1)
+        self.SQLQuery = response.strip("\n\t").replace("\n", " ")
+        self.SQLQuery = re.sub(r";(.*)", r";", self.SQLQuery, flags=re.DOTALL)
 
         return self.SQLQuery
+
+    def parse_nl_response(self, response: str) -> str:
+        """Parse NL response"""
+        lines = response.split(".")
+        # Get the first line (if it exists)
+        first_line = lines[0] if lines else ""
+        return first_line
     
     def run(self, query: str):
         print(f"EXECUTION STARTED AT {datetime.datetime.now()}")
@@ -220,34 +223,45 @@ class QueryExecutor:
         self.vector_index_dict = self.index_all_tables()
 
         table_schema_objs = self.obj_retriever.retrieve(query)
-        print(f"[TABLE_SCHEMA_OBJ]: {table_schema_objs}")
+        for table in table_schema_objs:
+            print(f"[matched_table]: {table.table_name}")
+        
         context_str = self.get_table_context_and_rows_str(query_str=query, table_schema_objs=table_schema_objs)
-        context_str += f"Write a SQL query for this user query: '{query}'"
-        # print(f"[CONTEXT_STR]: {context_str}")
+        context_str += f"Using this table schema ONLY, write a syntactically correct SQL query as mentioned in this query and do not make up any information: '{query}'"
+        print(f"[LLM_CONTEXT_STR]: {context_str}")
 
+        # Firstly, pull the model from ollama by 'ollama pull deepseel-coder'
+        try:
+            response = ollama.chat(
+                model='deepseek-coder',
+                messages=[{'role': 'user', 'content': context_str}],
+                stream=False,
+                keep_alive=True
+            )
 
-        response = ollama.chat(
-            model='phi3',
-            messages=[{'role': 'user', 'content': context_str}],
-            stream=False,
-        )
+            print(f"[RESPONSE: {response}")
+            sql_parsed = self.parse_response_to_sql(response['message']['content'])
+            print(f"[LOG] Finished processing at {datetime.datetime.now()}")
+            print(f"[PARSED_SQL]: {sql_parsed}")
+            
+            sql_res = execute_query(self.sql_connection, sql_parsed)
+            print(f"[SQL_RES]: {sql_res}")
 
-        sql_parsed = self.parse_response_to_sql(response['message']['content'])
-        # print(f"[PARSED_SQL]: {sql_parsed}")
+            response_synthesis_prompt_str = f"Given an input question, a SQL query and the SQL response from that query, write a very short one-line chatbot response of the SQL response and DO NOT make up any information. If the SQL response is empty, simply tell that no such result was found in a single short response. user query: {query}, sql query: {sql_parsed}, sql response: {sql_res}"
 
-        sql_res = execute_query(self.sql_connection, sql_parsed)
-        # print(f"[SQL_RES]: {sql_res}")
+            # print(f"[NL_RESPONSE_PROMPT]: {response_synthesis_prompt_str}")
 
-        response_synthesis_prompt_str = f"Given an input question, a SQL query and the SQL response from that query, write a short one-line natural language description of the SQL response and do not make up any information. user query: {query}, sql query: {sql_parsed}, sql response: {sql_res}"
+            response = ollama.chat(
+                model='deepseek-coder',
+                messages=[{'role': 'user', 'content': response_synthesis_prompt_str}],
+                stream=False,
+            )
 
-        # print(f"[NL_RESPONSE_PROMPT]: {response_synthesis_prompt_str}")
+            response_parsed = self.parse_nl_response(response['message']['content'])
+            print(f"[NL_RESPONSE]: {response_parsed}")
 
-        response = ollama.chat(
-            model='phi3',
-            messages=[{'role': 'user', 'content': response_synthesis_prompt_str}],
-            stream=False,
-        )
-        # print(f"[NL_RESPONSE]: {response['message']['content']}")
+            print(f"EXECUTION FINISHED AT {datetime.datetime.now()}")
+            return sql_parsed, response_parsed
 
-        print(f"EXECUTION FINISHED AT {datetime.datetime.now()}")
-        return sql_parsed, response['message']['content']
+        except Exception as e:
+            return e
