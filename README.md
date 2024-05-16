@@ -51,6 +51,7 @@ pip install llama-index-llms-vllm
 
 ## Run FastAPI server 
 Choose the LLM model to run by passing the ``--llm`` flag from the terminal.<br>
+<b>```win/direct_pipeline.py``` offers much faster inference as it directly interfaces with ollama. To use it, import it in ```app.py```</b>
 ```
 python app.py --llm vllm
 python app.py --llm ollama
