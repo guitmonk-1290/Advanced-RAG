@@ -11,7 +11,8 @@ Download Ollama from it's website: https://ollama.com/
 Run these commands to pull the appropriate models for creating embeddings and generating response
 ```
 ollama pull phi3
-ollama pull mxbai-embed-large
+ollama pull deepseek-coder
+ollama pull nomic-embed-text
 
 ollama list
 ```
