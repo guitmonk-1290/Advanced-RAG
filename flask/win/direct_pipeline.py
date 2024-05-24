@@ -147,15 +147,15 @@ class QueryExecutor:
             table_info += f"CREATE TABLE `{table_schema_obj.table_name}` ("
             for column in columns:
                 # Format column information
-                column_info = f"`{column.name}` {column.type}"
+                column_info = f"'{column.name}' {column.type}"
                 # Add information about constraints (e.g., primary key, not null)
-                if column.primary_key:
-                    column_info += " PRIMARY KEY"
-                if not column.nullable:
-                    column_info += " NOT NULL"
+                # if column.primary_key:
+                #     column_info += " PRIMARY KEY"
+                # if not column.nullable:
+                #     column_info += " NOT NULL"
                 if column.comment:
                     column_info += f" '{column.comment}'"
-                table_info += f"{column_info}, \n"
+                table_info += f"{column_info}, "
             table_info += ")\n"
 
 
@@ -201,7 +201,8 @@ class QueryExecutor:
 
     def parse_response_to_sql(self, response: str) -> str:
         """Parse response to SQL."""
-        pattern = r'```sql\n+(.*?)\n+```'
+        print(f"[RAW_RESPONSE] {response}")
+        pattern = r"(?:`sql\n+|\bSQL\b)(.*?)(?:\n+`|$)"
         match = re.search(pattern, response, re.DOTALL)
         if match:
             response = match.group(1)
@@ -227,41 +228,54 @@ class QueryExecutor:
             print(f"[matched_table]: {table.table_name}")
         
         context_str = self.get_table_context_and_rows_str(query_str=query, table_schema_objs=table_schema_objs)
-        context_str += f"Using this table schema ONLY, write a syntactically correct SQL query as mentioned in this query and do not make up any information: '{query}'"
+        context_str += f"According to this table schema, write a syntactically correct SQL query as mentioned in the following query and do not make up any information. ONLY write the SQL query and nothing else. query: '{query}'"
         print(f"[LLM_CONTEXT_STR]: {context_str}")
 
-        # Firstly, pull the model from ollama by 'ollama pull deepseel-coder'
-        try:
-            response = ollama.chat(
-                model='deepseek-coder',
-                messages=[{'role': 'user', 'content': context_str}],
-                stream=False,
-                keep_alive=True
-            )
+        # Firstly, pull the model from ollama by 'ollama pull deepseek-coder'
+        response = ollama.chat(
+            model='deepseek-coder',
+            messages=[{'role': 'user', 'content': context_str}],
+            stream=False,
+            keep_alive=True
+        )
 
-            print(f"[RESPONSE: {response}")
-            sql_parsed = self.parse_response_to_sql(response['message']['content'])
-            print(f"[LOG] Finished processing at {datetime.datetime.now()}")
-            print(f"[PARSED_SQL]: {sql_parsed}")
-            
-            sql_res = execute_query(self.sql_connection, sql_parsed)
-            print(f"[SQL_RES]: {sql_res}")
+        print(f"[RESPONSE: {response}")
+        sql_parsed = self.parse_response_to_sql(response['message']['content'])
+        print(f"[LOG] Finished processing at {datetime.datetime.now()}")
+        print(f"[PARSED_SQL]: {sql_parsed}")
+        
+        sql_res = execute_query(self.sql_connection, sql_parsed)
+        print(f"[SQL_RES]: {sql_res}")
 
-            response_synthesis_prompt_str = f"Given an input question, a SQL query and the SQL response from that query, write a very short one-line chatbot response of the SQL response and DO NOT make up any information. If the SQL response is empty, simply tell that no such result was found in a single short response. user query: {query}, sql query: {sql_parsed}, sql response: {sql_res}"
+        response_synthesis_prompt_str_system = f"""
+Given an input question and the answer for that query from a SQL database, combine the input and the SQL answer into a concise single-line natural language response to answer the input question and DO NOT make up any information. If the SQL answer is empty, simply tell that no such result was found in a single short response. ONLY return the single-line answer to the question and nothing else.
 
-            # print(f"[NL_RESPONSE_PROMPT]: {response_synthesis_prompt_str}")
+Here is a relevant example:
 
-            response = ollama.chat(
-                model='deepseek-coder',
-                messages=[{'role': 'user', 'content': response_synthesis_prompt_str}],
-                stream=False,
-            )
+Input Question: what is the status of ticket with id '4556'
+SQL Response: [{{"status": "2"}}]
+Your Response: The status of the ticket is '2'
+"""
+        
+        response_synthesis_prompt_str_user = f"""
+        Input Question: {query}
+        SQL Response: {sql_res}
+        Your Response:
+        """
 
-            response_parsed = self.parse_nl_response(response['message']['content'])
-            print(f"[NL_RESPONSE]: {response_parsed}")
+        # print(f"[NL_RESPONSE_PROMPT]: {response_synthesis_prompt_str}")
 
-            print(f"EXECUTION FINISHED AT {datetime.datetime.now()}")
-            return sql_parsed, response_parsed
+        response = ollama.chat(
+            model='tinyllama:1.1b-chat',
+            messages=[
+                {'role': 'system', 'content': response_synthesis_prompt_str_system},
+                {'role': 'user', 'content': response_synthesis_prompt_str_user}
+            ],
+            stream=False,
+        )
 
-        except Exception as e:
-            return e
+        # response_parsed = self.parse_nl_response(response['message']['content'])
+        print(f"[NL_RESPONSE]: {response['message']['content']}")
+
+        print(f"EXECUTION FINISHED AT {datetime.datetime.now()}")
+        return sql_parsed, response['message']['content']
