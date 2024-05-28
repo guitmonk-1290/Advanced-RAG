@@ -165,15 +165,15 @@ class QueryExecutor:
                 table_info += table_opt_context
 
             # also lookup vector index to return relevant table rows
-            relevant_nodes = self.vector_index_dict[
-                table_schema_obj.table_name
-            ].as_retriever(similarity_top_k=1).retrieve(query_str)
-            if len(relevant_nodes) > 0:
-                print(f"[LOG] relevant_nodes: {relevant_nodes[0]}")
-                table_row_context = "\nHere are some relevant example rows (values in the same order as columns above)\n"
-                for node in relevant_nodes:
-                    table_row_context += str(node.get_content()) + "\n"
-                table_info += table_row_context
+            # relevant_nodes = self.vector_index_dict[
+            #     table_schema_obj.table_name
+            # ].as_retriever(similarity_top_k=1).retrieve(query_str)
+            # if len(relevant_nodes) > 0:
+            #     print(f"[LOG] relevant_nodes: {relevant_nodes[0]}")
+            #     table_row_context = "\nHere are some relevant example rows (values in the same order as columns above)\n"
+            #     for node in relevant_nodes:
+            #         table_row_context += str(node.get_content()) + "\n"
+            #     table_info += table_row_context
 
             # context_strs.append(table_info)
             context_strs += f"{table_info}\n"
@@ -201,13 +201,22 @@ class QueryExecutor:
 
     def parse_response_to_sql(self, response: str) -> str:
         """Parse response to SQL."""
-        print(f"[RAW_RESPONSE] {response}")
-        pattern = r"(?:`sql\n+|\bSQL\b)(.*?)(?:\n+`|$)"
-        match = re.search(pattern, response, re.DOTALL)
+        # pattern = r"(?:`sql\n+|\bSQL\b)(.*?)(?:\n+`|$)"
+        # match = re.search(pattern, response, re.DOTALL)
+        # if match:
+        #     response = match.group(1)
+        # self.SQLQuery = response.strip("\n\t").replace("\n", " ")
+        # self.SQLQuery = re.sub(r";(.*)", r";", self.SQLQuery, flags=re.DOTALL)
+
+        sql_pattern = r"(?i)(SELECT)\s+.*?;"
+    
+        # Search for the SQL query in the input string
+        match = re.search(sql_pattern, response, re.DOTALL)
+        
         if match:
-            response = match.group(1)
-        self.SQLQuery = response.strip("\n\t").replace("\n", " ")
-        self.SQLQuery = re.sub(r";(.*)", r";", self.SQLQuery, flags=re.DOTALL)
+            self.SQLQuery = match.group(0)
+        else:
+            self.SQLQuery = None
 
         return self.SQLQuery
 
@@ -248,20 +257,30 @@ class QueryExecutor:
         print(f"[SQL_RES]: {sql_res}")
 
         response_synthesis_prompt_str_system = f"""
-Given an input question and the answer for that query from a SQL database, combine the input and the SQL answer into a concise single-line natural language response to answer the input question and DO NOT make up any information. If the SQL answer is empty, simply tell that no such result was found in a single short response. ONLY return the single-line answer to the question and nothing else.
+You are a chatbot that takes an input question about a database and responds to the input question in natural language. 
+Given an input question and the SQL result for that question from a SQL database, combine the input and the SQL result into a concise single-line natural language response to answer the input question and DO NOT make up any information.
+Follow these guidelines to generate your response:
+- If the SQL response is an empty list, simply give the response that there is no such result found.
+- ONLY return the single-line answer based on the SQL Answer
 
-Here is a relevant example:
+Here are some relevant examples:
 
 Input Question: what is the status of ticket with id '4556'
-SQL Response: [{{"status": "2"}}]
-Your Response: The status of the ticket is '2'
+SQL result: [{{"status": "2"}}]
+AI response: The status of the ticket is '2'.
+
+Input Question: what is the incident date of ticket with id '4556'
+SQL result: [{{"incident_date": "2024-03-05"}}]
+AI response: The incident date of the ticket is "2024-03-05"
 """
         
         response_synthesis_prompt_str_user = f"""
-        Input Question: {query}
-        SQL Response: {sql_res}
-        Your Response:
+Answer this question based on the SQL answer and return only a very short single-line chatbot response directly answering the question and NOTHING ELSE.
+Input Question: {query}
+SQL result: {sql_res if len(sql_res) else 'There is no such result in the database'}
         """
+
+        print(f"[prompt]: {response_synthesis_prompt_str_user}")
 
         # print(f"[NL_RESPONSE_PROMPT]: {response_synthesis_prompt_str}")
 
@@ -272,10 +291,11 @@ Your Response: The status of the ticket is '2'
                 {'role': 'user', 'content': response_synthesis_prompt_str_user}
             ],
             stream=False,
+            keep_alive=True
         )
 
-        # response_parsed = self.parse_nl_response(response['message']['content'])
+        response_parsed = self.parse_nl_response(response['message']['content'])
         print(f"[NL_RESPONSE]: {response['message']['content']}")
 
         print(f"EXECUTION FINISHED AT {datetime.datetime.now()}")
-        return sql_parsed, response['message']['content']
+        return sql_parsed, response['message']['content'], sql_res
