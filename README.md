@@ -27,14 +27,7 @@ python -m venv .venv
 cd .venv/Scripts
 ./activate
 
-pip install llama-index llama-index-llms-ollama llama-index-embeddings-ollama
-pip install langchain
-pip install mysql-connector-python
-pip install chromadb
-pip install llama-index-vector-stores-chroma
-pip install fastapi
-pip install ray
-pip install "starlette==0.32.0"
+pip install -r requirements.txt
 ```
 
 ## Installation - with vLLM
@@ -82,10 +75,18 @@ Make sure to integrate the code in your codebase.
 ng serve
 ```
 
+## Model considerations
+After testing with a few open-source LLMs, here are the considerations:<br>
+<ol>
+  <li>Smaller LLMs like <b>"deepseek-coder"</b> can be used for single-table queries</li>
+  <li>For multi-table queries, either of the following can be done:
+    <ul>
+    <li>Fine-tune the model on your data</li>
+    <li>Use a larger LLM model like llama3</li>
+    </ul>
+  </li>
+  <li>If you do not want to use open-source LLMs, ChatGPT and Gemini are also good choices for the results</li>
+</ol>
+
 ## Contributing
-Feel free to contribute if you have a better solution regarding:
-<ul>
-  <li><b>Query pipeline:</b> Changing the llama query pipeline</li>
-  <li><b>Production ready:</b> Making this more accessible for production using ray serve or any other alternatives</li>
-  <li>Any other features which could be useful</li>
-</ul>
+Feel free to contribute if you have a better approach towards better results and accuracy :)
